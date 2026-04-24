@@ -1110,7 +1110,7 @@ def is_position_open(symbol):
             return True
     return False
 
-def (symbol):
+def place_recovery_order(symbol):
     if symbol not in trade_state:
         return
 
