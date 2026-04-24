@@ -1132,7 +1132,7 @@ def place_recovery_order(symbol):
         rec_entry = sl
         rec_tp = find_tp_structure_30m(symbol, entry, "BUY", rec_entry)
         position_idx = 1
-    chosen_sl = find_structure_sl(symbol, entry, "BUY", rec_entry) if side == "BUY" else find_structure_sl(symbol, entry, "SELL", rec_entry):
+    chosen_sl = find_structure_sl(symbol, entry, "BUY", rec_entry) if side == "BUY" else find_structure_sl(symbol, entry, "SELL", rec_entry)
        
     logger.info(f"recovery chosen sl: {chosen_sl}")
 
@@ -1144,7 +1144,7 @@ def place_recovery_order(symbol):
             
     risk_amount = weekly_rf
     raw_qty = risk_amount / abs(entry - risk_sl)
-    recovery_qty = loss / rec_entry - rec_tp)
+    recovery_qty = loss / (rec_entry - rec_tp)
     recovery_qty = round_qty(symbol, recovery_qty)
     recovery_qty = fit_qty_to_margin(symbol, rec_entry, leverage, recovery_qty)
     if recovery_qty <= 0:
