@@ -667,17 +667,66 @@ def update_trailing_sl():
         except Exception as e:
             logger.error(f"{symbol} | SL update failed: {e}")
 
+def place_recovery_order(symbol):
+    if symbol not in trade_state:
+        return
+
+    t = trade_state[symbol]
+
+    # ❌ DO NOT place if 1R already reached
+
+    entry = t["entry"]
+    sl = t["sl"]
+    side = t["side"]
+    qty = t["qty"]
+
+    if side == "BUY":
+        rec_side = "Sell"
+        rec_entry = sl
+        rec_sl = entry
+        rec_tp = rec_entry - (rec_sl - rec_entry)  # 1:1
+        position_idx = 2
+    else:
+        rec_side = "Buy"
+        rec_entry = sl
+        rec_sl = entry
+        rec_tp = rec_entry + (rec_entry - rec_sl)
+        position_idx = 1
+
+    try:
+        resp = session.place_order(
+            category=CATEGORY,
+            symbol=symbol,
+            side=rec_side,
+            orderType="Limit",
+            price=str(rec_entry),
+            qty=str(qty),
+            timeInForce="GTC",
+            positionIdx=position_idx
+        )
+
+        order_id = resp["result"]["orderId"]
+
+        recovery_orders[symbol] = {
+            "order_id": order_id,
+            "side": rec_side,
+            "entry": rec_entry,
+            "qty": qty
+        }
+
+        logger.info(f"{symbol} | Recovery order placed")
+
+    except Exception as e:
+        logger.error(f"{symbol} | Recovery order error: {e}")
+
 def position_exists(symbol, side):
 
     for pos in account_cache["positions"]:
-
         if pos["symbol"] == symbol:
             size = float(pos["size"])
             pos_side = pos["side"]
-
             if size > 0 and pos_side == side:
                 return True
-
     return False
     
 def lock_weekly_rf_if_needed():
@@ -1061,7 +1110,7 @@ def is_position_open(symbol):
             return True
     return False
 
-def place_recovery_order(symbol):
+def (symbol):
     if symbol not in trade_state:
         return
 
@@ -1123,7 +1172,7 @@ def place_recovery_order(symbol):
     except Exception as e:
         logger.error(f"{symbol} | Recovery order error: {e}")
 
-def update_recovery_order(symbol, new_sl):
+def (symbol, new_sl):
     if symbol not in recovery_orders or symbol not in trade_state:
         return
 
@@ -1386,26 +1435,6 @@ def handle_symbol(pair):
                 return
             sl = bf["low"]
             chosen_sl = find_structure_sl(symbol, entry, "BUY", sl)
-
-             
-            # z1 = find_consolidation_sl(symbol, entry, "BUY")
-            # levels_list = []
-            
-            # if s1:
-            #     for s in s1
-            #         levels_list.append(s)
-                
-            # levels = [x for x in levels_list if x is not None]
-            
-            # logger.info(f"levels fcn: {levels_list}")
-            # logger.info(f"levels fcr: {levels_list}")
-            
-            # chosen_sl = None
-            
-            # for lvl in reversed(levels_list):
-            #     if lvl < bf["low"]:   # must be ABOVE FVG low
-            #         chosen_sl = lvl
-            #         break
        
             logger.info(f"chosen sl: {chosen_sl}")
 
@@ -1559,30 +1588,8 @@ def handle_symbol(pair):
                 return
             sl = sf["high"] 
             chosen_sl = find_structure_sl(symbol, entry, "SELL", sl)      
-            
-            # levels_list = []
-            
-            # if s1 and z1:
-            #     for s, z in zip(s1, z1):
-            #         levels_list.append((s, z))
-                
-            # levels = [x for x in levels_list if x is not None]
-            
-            # logger.info(f"levels fcB: {levels_list}")
-            
-            # chosen_sl = None
-            
-            # for lvl in reversed(levels_list):
-            #     if lvl > sf["high"]:   # must be ABOVE FVG low
-            #         chosen_sl = lvl
-            #         break
-            # if chosen_sl is None:
-            #     chosen_sl = sf["high"]
                 
             logger.info(f"chosen sl: {chosen_sl}")
-                
-            # real_sl = chosen_sl
-
                 
             real_sl = chosen_sl if chosen_sl else max(
                 sf["high"],
