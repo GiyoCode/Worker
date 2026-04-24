@@ -1174,7 +1174,7 @@ def place_recovery_order(symbol):
             "qty": qty
         }
 
-         logger.info(f"{symbol} | Recovery order placed")
+        logger.info(f"{symbol} | Recovery order placed")
 
     except Exception as e:
         logger.error(f"{symbol} | Recovery order error: {e}")
