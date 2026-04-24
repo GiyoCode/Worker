@@ -1132,13 +1132,13 @@ def place_recovery_order(symbol):
         rec_entry = sl
         rec_tp = find_tp_structure_30m(symbol, entry, "BUY", rec_entry)
         position_idx = 1
-    chosen_sl = find_structure_sl(symbol, entry, "BUY", rec_entry) if side == "BUY" else find_structure_sl(symbol, entry, "SELL", rec_entry)
+    chosen_sl = find_structure_sl(symbol, entry, "SELL", rec_entry) if side == "BUY" else find_structure_sl(symbol, entry, "BUY", rec_entry)
        
     logger.info(f"recovery chosen sl: {chosen_sl}")
 
     real_sl = chosen_sl
             
-    logger.info(f"{symbol} | RECOVERY STRUCTURE SL (BUY): {real_sl}")
+    logger.info(f"{symbol} | RECOVERY STRUCTURE SL: {real_sl}")
             
     risk_sl = real_sl * (1 - (SL_BUFFER * 2))
             
@@ -1174,7 +1174,7 @@ def place_recovery_order(symbol):
             "qty": qty
         }
 
-        logger.info(f"{symbol} | Recovery order placed")
+         logger.info(f"{symbol} | Recovery order placed")
 
     except Exception as e:
         logger.error(f"{symbol} | Recovery order error: {e}")
