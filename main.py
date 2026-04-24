@@ -653,7 +653,7 @@ def update_trailing_sl():
         # APPLY UPDATE
         # =========================
         if symbol in trade_state:
-         update_recovery_order(symbol, new_sl)
+            update_recovery_order(symbol, new_sl)
         try:
             session.set_trading_stop(
                 category="linear",
@@ -1172,7 +1172,7 @@ def place_recovery_order(symbol):
     except Exception as e:
         logger.error(f"{symbol} | Recovery order error: {e}")
 
-def (symbol, new_sl):
+def update_recovery_order(symbol, new_sl):
     if symbol not in recovery_orders or symbol not in trade_state:
         return
 
