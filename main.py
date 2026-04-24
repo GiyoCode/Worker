@@ -1122,8 +1122,29 @@ def place_recovery_order(symbol):
     loss = abs(t["entry"] - t["sl"]) * t["qty"]
     specs = get_symbol_specs(symbol)
     leverage = specs["max_leverage"]
-    recovery_qty = loss / abs(rec_entry - rec_tp)
+    if side == "BUY":
+        rec_side = "Sell"
+        rec_entry = sl
+        rec_tp = find_tp_structure_30m(symbol, entry, "SELL", rec_entry)
+        position_idx = 2
+    else:
+        rec_side = "Buy"
+        rec_entry = sl
+        rec_tp = find_tp_structure_30m(symbol, entry, "BUY", rec_entry)
+        position_idx = 1
+    chosen_sl = find_structure_sl(symbol, entry, "BUY", rec_entry) if side == "BUY" else find_structure_sl(symbol, entry, "SELL", rec_entry):
+       
+    logger.info(f"recovery chosen sl: {chosen_sl}")
 
+    real_sl = chosen_sl
+            
+    logger.info(f"{symbol} | RECOVERY STRUCTURE SL (BUY): {real_sl}")
+            
+    risk_sl = real_sl * (1 - (SL_BUFFER * 2))
+            
+    risk_amount = weekly_rf
+    raw_qty = risk_amount / abs(entry - risk_sl)
+    recovery_qty = loss / rec_entry - rec_tp)
     recovery_qty = round_qty(symbol, recovery_qty)
     recovery_qty = fit_qty_to_margin(symbol, rec_entry, leverage, recovery_qty)
     if recovery_qty <= 0:
@@ -1132,20 +1153,6 @@ def place_recovery_order(symbol):
         return
     qty = recovery_qty
  
-
-    if side == "BUY":
-        rec_side = "Sell"
-        rec_entry = sl
-        rec_sl = entry
-        rec_tp = rec_entry - (rec_sl - rec_entry)  # 1:1
-        position_idx = 2
-    else:
-        rec_side = "Buy"
-        rec_entry = sl
-        rec_sl = entry
-        rec_tp = rec_entry + (rec_entry - rec_sl)
-        position_idx = 1
-
     try:
         resp = session.place_order(
             category=CATEGORY,
