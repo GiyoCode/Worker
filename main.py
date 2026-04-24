@@ -699,8 +699,8 @@ def lock_weekly_rf_if_needed():
         siphoned_cash += siphon_amount
 
         effective_balance = real_balance 
-
-        weekly_rf = 10
+        weekly_rf = round(effective_balance * RF_PERCENT, 6)
+        # weekly_rf = 10
 
         logger.info("===========================================")
         logger.info(f"NEW WEEK LOCKED: {current_week}")
