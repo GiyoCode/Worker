@@ -237,7 +237,7 @@ def sl_too_small(entry, sl):
     sl_pct = abs(entry - sl) / entry
     return sl_pct < 0.001  # 0.1%
 
-def find_structure_sl(symbol, entry, side, sl, lookback=20):
+def find_structure_sl(symbol, side, sl, lookback=20):
     candles = fetch_candles(symbol, interval=INTERVAL, limit=30)
 
     levels = []
@@ -621,8 +621,9 @@ def update_trailing_sl():
 
         # Normalize side
         side_clean = "BUY" if side == "Buy" else "SELL"
+        entry = 1
 
-        new_swing = find_latest_swing_30m(symbol, side_clean)
+        new_swing = find_structure_sl(symbol, side_clean, current_sl)
 
         if new_swing is None:
             continue
@@ -1080,8 +1081,8 @@ def place_recovery_order(symbol):
         rec_side = "Buy"
         rec_entry = sl
         position_idx = 1
-        
-    real_sl = find_latest_swing_30m(symbol, rec_side.upper())
+    entry = 1
+    real_sl = find_structure_sl(symbol, rec_side.upper(), rec_entry)
 
     if real_sl is None:
         logger.warning(f"{symbol} | No valid SL for recovery, skipping")
@@ -1157,6 +1158,7 @@ def place_recovery_order(symbol):
 
     except Exception as e:
         logger.error(f"{symbol} | Recovery order error: {e}")
+        logger.info(rec_tp,recovery_qty,sl_distance,risk_sl,rec_sl,rec_entry,loss,symbol)
 
 def update_recovery_order(symbol, new_sl):
     if symbol not in recovery_orders or symbol not in trade_state:
@@ -1420,7 +1422,7 @@ def handle_symbol(pair):
                 logger.info(f"{symbol} | BUY ignored: no deepest touch recorded")
                 return
             sl = bf["low"]
-            chosen_sl = find_structure_sl(symbol, entry, "BUY", sl)
+            chosen_sl = find_structure_sl(symbol, "BUY", sl)
        
             logger.info(f"chosen sl: {chosen_sl}")
 
@@ -1573,7 +1575,7 @@ def handle_symbol(pair):
                 logger.info(f"{symbol} | SELL ignored: no deepest touch recorded")
                 return
             sl = sf["high"] 
-            chosen_sl = find_structure_sl(symbol, entry, "SELL", sl)      
+            chosen_sl = find_structure_sl(symbol, "SELL", sl)      
                 
             logger.info(f"chosen sl: {chosen_sl}")
                 
