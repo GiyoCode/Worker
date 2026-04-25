@@ -313,8 +313,8 @@ def find_consolidation_sl(symbol, entry, side, lookback=20, tolerance=0.002):
         return None
         
     if levels:
-        logger.info(f"levels fc: {levels}")
-    return None
+        logger.info(f"levels fc: {levels[-1]}")
+        return levels[-1]
     
 def get_symbol_specs(symbol):
     if symbol in symbol_specs:
@@ -666,58 +666,6 @@ def update_trailing_sl():
 
         except Exception as e:
             logger.error(f"{symbol} | SL update failed: {e}")
-
-def place_recovery_order(symbol):
-    if symbol not in trade_state:
-        return
-
-    t = trade_state[symbol]
-
-    # ❌ DO NOT place if 1R already reached
-
-    entry = t["entry"]
-    sl = t["sl"]
-    side = t["side"]
-    qty = t["qty"]
-
-    if side == "BUY":
-        rec_side = "Sell"
-        rec_entry = sl
-        rec_sl = entry
-        rec_tp = rec_entry - (rec_sl - rec_entry)  # 1:1
-        position_idx = 2
-    else:
-        rec_side = "Buy"
-        rec_entry = sl
-        rec_sl = entry
-        rec_tp = rec_entry + (rec_entry - rec_sl)
-        position_idx = 1
-
-    try:
-        resp = session.place_order(
-            category=CATEGORY,
-            symbol=symbol,
-            side=rec_side,
-            orderType="Limit",
-            price=str(rec_entry),
-            qty=str(qty),
-            timeInForce="GTC",
-            positionIdx=position_idx
-        )
-
-        order_id = resp["result"]["orderId"]
-
-        recovery_orders[symbol] = {
-            "order_id": order_id,
-            "side": rec_side,
-            "entry": rec_entry,
-            "qty": qty
-        }
-
-        logger.info(f"{symbol} | Recovery order placed")
-
-    except Exception as e:
-        logger.error(f"{symbol} | Recovery order error: {e}")
 
 def position_exists(symbol, side):
 
@@ -1113,6 +1061,8 @@ def is_position_open(symbol):
 def place_recovery_order(symbol):
     if symbol not in trade_state:
         return
+    if symbol in recovery_orders:
+        return
 
     t = trade_state[symbol]
 
@@ -1130,33 +1080,43 @@ def place_recovery_order(symbol):
         rec_side = "Buy"
         rec_entry = sl
         position_idx = 1
-    
-    risk_amount = weekly_rf
-    
-    sl_distance = abs(rec_entry - rec_sl)
-    
-    recovery_qty = risk_amount / sl_distance
-    recovery_qty = round_qty(symbol, recovery_qty)
-    recovery_qty = fit_qty_to_margin(symbol, rec_entry, leverage, recovery_qty)
-    
-    loss = abs(t["entry"] - t["sl"]) * t["qty"]
-
-    tp_distance = loss / recovery_qty
-
-    if rec_side == "Buy":
-        rec_tp = rec_entry + tp_distance
-    else:
-        rec_tp = rec_entry - tp_distance
-
+        
     real_sl = find_latest_swing_30m(symbol, rec_side.upper())
+
+    if real_sl is None:
+        logger.warning(f"{symbol} | No valid SL for recovery, skipping")
+        return
        
     logger.info(f"recovery chosen sl: {real_sl}")
 
     rec_sl = real_sl
             
-    logger.info(f"{symbol} | RECOVERY STRUCTURE SL (BUY): {rec_sl}")
-            
-    risk_sl = real_sl * (1 - (SL_BUFFER * 2))
+    logger.info(f"{symbol} | RECOVERY STRUCTURE SL: {rec_sl}")
+    if rec_side.upper() == "BUY":
+        rec_sl = real_sl * (1 - (SL_BUFFER * 1))
+        risk_amount = weekly_rf
+        risk_sl = rec_sl * (1 - (SL_BUFFER * 1))
+    else:
+        rec_sl = real_sl * (1 + (SL_BUFFER * 1))
+        risk_amount = weekly_rf
+        risk_sl = rec_sl * (1 + (SL_BUFFER * 1))
+    sl_distance = abs(rec_entry - risk_sl)
+    if sl_distance <= 0:
+        return
+    recovery_qty = risk_amount / sl_distance
+    recovery_qty = round_qty(symbol, recovery_qty)
+    recovery_qty = fit_qty_to_margin(symbol, rec_entry, leverage, recovery_qty)
+    
+    if recovery_qty is None:
+        return
+    if recovery_qty <= 0:
+        return
+    tp_distance = abs(rec_entry - rec_sl)
+
+    if rec_side.upper() == "BUY":
+        rec_tp = rec_entry + tp_distance
+    else:
+        rec_tp = rec_entry - tp_distance
             
     if recovery_qty <= 0:
         return
@@ -1175,6 +1135,12 @@ def place_recovery_order(symbol):
             timeInForce="GTC",
             positionIdx=position_idx
         )
+        session.set_trading_stop(
+            category=CATEGORY,
+            symbol=symbol,
+            stopLoss=str(rec_sl),
+            takeProfit=str(rec_tp),
+            positionIdx=position_idx)
 
         order_id = resp["result"]["orderId"]
 
@@ -1204,8 +1170,8 @@ def update_recovery_order(symbol, new_sl):
             symbol=symbol,
             orderId=rec["order_id"]
         )
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"{symbol} | Failed to cancel recovery order: {e}")
 
     # update SL
     t["sl"] = new_sl
@@ -1737,8 +1703,8 @@ def place_real_trade(symbol, side, entry, sl, tp, leverage, frozen_risk, qty):
                 category=CATEGORY,
                 symbol=symbol,
                 orderId=recovery_orders[symbol]["order_id"])
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"{symbol} | Failed to cancel recovery order: {e}")
         del recovery_orders[symbol]
     
     if symbol in trade_state:
@@ -1860,31 +1826,30 @@ def main():
 
             refresh_account_cache()
             update_trailing_sl()
+            for p in PAIRS: 
+                update_daily_bias(p["symbol"])
             for p in PAIRS:
                 symbol = p["symbol"]
                 candles = fetch_candles(symbol)
                 
                 update_trade_progress(symbol, candles)
-                if symbol not in recovery_orders:
-                    place_recovery_order(symbol)
-                    for p in PAIRS: 
-                        update_daily_bias(p["symbol"])
-                for symbol in list(trade_state.keys()):
-                    if not is_position_open(symbol):
-                        if symbol in recovery_orders:
-                            try:
-                                session.cancel_order(
-                                    category=CATEGORY,
-                                    symbol=symbol,
-                                    orderId=recovery_orders[symbol]["order_id"])
-                            except:
-                                pass
-                            del recovery_orders[symbol]
-                        del trade_state[symbol]
-                for symbol in trade_state:
-                    if symbol not in recovery_orders:
-                        place_recovery_order(symbol)
-                        logger.info(f"{symbol} | Trade closed → cleanup done")
+                    
+            for sym in list(trade_state.keys()):
+                if not is_position_open(sym):
+                    if sym in recovery_orders:
+                        try:
+                            session.cancel_order(
+                                category=CATEGORY,
+                                symbol=sym,
+                                orderId=recovery_orders[sym]["order_id"])
+                        except Exception as e:
+                            logger.error(f"{sym} | Failed to cancel recovery order: {e}")
+                        del recovery_orders[sym]
+                    del trade_state[sym]
+            for sym in trade_state:
+                if sym not in recovery_orders:
+                    place_recovery_order(sym)
+                    logger.info(f"{sym} | Trade closed → cleanup done")
             
             # Lock per-day RF at start of UTC day if needed (one global RF for all pairs)
             lock_weekly_rf_if_needed()
