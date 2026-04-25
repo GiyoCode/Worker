@@ -1152,6 +1152,8 @@ def place_recovery_order(symbol):
         }
 
         logger.info(f"{symbol} | Recovery order placed")
+        logger.info(rec_tp,recovery_qty,sl_distance,risk_sl,rec_sl,rec_entry,loss,symbol)
+        
 
     except Exception as e:
         logger.error(f"{symbol} | Recovery order error: {e}")
@@ -1849,7 +1851,7 @@ def main():
             for sym in trade_state:
                 if sym not in recovery_orders:
                     place_recovery_order(sym)
-                    logger.info(f"{sym} | Trade closed → cleanup done")
+                    logger.info(f"{sym} | Recovery order placed")
             
             # Lock per-day RF at start of UTC day if needed (one global RF for all pairs)
             lock_weekly_rf_if_needed()
