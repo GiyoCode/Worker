@@ -1,7 +1,3 @@
-please summarise the changes to be made to this
-
-in this
-
 # !/usr/bin/env python3
 
 """
