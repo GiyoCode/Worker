@@ -1134,6 +1134,11 @@ def place_recovery_order(symbol):
             price=str(rec_entry),
             qty=str(qty),
             timeInForce="GTC",
+            
+            triggerPrice=str(rec_entry),
+            triggerDirection=1 if rec_side == "Buy" else 2,
+            triggerBy="LastPrice",
+            
             positionIdx=position_idx
         )
         session.set_trading_stop(
@@ -1153,12 +1158,17 @@ def place_recovery_order(symbol):
         }
 
         logger.info(f"{symbol} | Recovery order placed")
-        logger.info(rec_tp,recovery_qty,sl_distance,risk_sl,rec_sl,rec_entry,loss,symbol)
+        logger.info(
+            f"{symbol} | rec_tp={rec_tp}, qty={recovery_qty}, "
+            f"sl_dist={sl_distance}, risk_sl={risk_sl}, "
+            f"rec_sl={rec_sl}, entry={rec_entry}, loss={loss}")
         
-
     except Exception as e:
         logger.error(f"{symbol} | Recovery order error: {e}")
-        logger.info(rec_tp,recovery_qty,sl_distance,risk_sl,rec_sl,rec_entry,loss,symbol)
+        logger.info(
+            f"{symbol} | rec_tp={rec_tp}, qty={recovery_qty}, "
+            f"sl_dist={sl_distance}, risk_sl={risk_sl}, "
+            f"rec_sl={rec_sl}, entry={rec_entry}, loss={loss}")
 
 def update_recovery_order(symbol, new_sl):
     if symbol not in recovery_orders or symbol not in trade_state:
