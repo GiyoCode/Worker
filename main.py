@@ -1,4 +1,4 @@
- # !/usr/bin/env python3
+# !/usr/bin/env python3
 
 """
 LIVE PAPER FVG BOT (simulation only)
@@ -11,6 +11,14 @@ Notes:
     - This is a paper/simulation bot: it does NOT place real orders.
     - RF (risk factor in $) is locked once per UTC day and used unchanged for all trades that day.
     - SL updates only (TP remains fixed at entry calculation).
+
+RECOVERY ORDER LOGIC:
+    - Entry    = SL of the original trade (conditional trigger order)
+    - SL       = latest swing in the recovery trade's direction (structure-based)
+    - Qty      = weekly_rf / abs(rec_entry - rec_sl)   → same fixed-risk sizing as main trades
+    - TP       = 1:1 RR from entry  (rec_entry ± risk_distance)
+    - Order    = Conditional limit (triggerPrice = rec_entry), NOT a plain limit order
+    - Cancel   = ANY existing recovery order for a symbol is always cancelled before placing a new one
 """
 
 import os
@@ -56,9 +64,9 @@ daily_fvg_state = {}
 
 eligible_pairs = []
 
-recovery_orders = {}  
+recovery_orders = {}
 
-trade_state = {}  
+trade_state = {}
 
 last_scan = True
 last_daily_run = None
@@ -74,18 +82,17 @@ for p in PAIRS:
         "sell_fvg_low": None,
         "last_new_buy_fvg": None,
         "last_new_sell_fvg": None
-        
     }
 
-MAX_SYMBOLS = 100          # number of pairs to scan
-MAX_ACTIVE_TRADES = 6    # maximum open positions
+MAX_SYMBOLS = 100
+MAX_ACTIVE_TRADES = 6
 DEFAULT_LEVERAGE = 50
 
 last_symbol_refresh_week = None
 
 signal_queue = []
 
-    
+
 # ===========================
 # LOGGING & STATE
 # ===========================
@@ -129,7 +136,7 @@ def now_ts():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 def fetch_candles(symbol, interval=INTERVAL, limit=CANDLE_LIMIT):
-    for attempt in range(3):  # retry up to 3 times
+    for attempt in range(3):
         try:
             resp = session.get_kline(
                 category="linear",
@@ -161,14 +168,12 @@ def fetch_candles(symbol, interval=INTERVAL, limit=CANDLE_LIMIT):
         except Exception as e:
             err_msg = str(e)
 
-            # 🔥 HANDLE RATE LIMIT
             if "10006" in err_msg or "Too many visits" in err_msg:
-                sleep_time = 1 + attempt  # exponential backoff
+                sleep_time = 1 + attempt
                 logger.warning(f"{symbol} | Rate limited, sleeping {sleep_time}s")
                 time.sleep(sleep_time)
                 continue
 
-            # 🔥 HANDLE HEADER ERROR
             elif "x-bapi-limit-reset-timestamp" in err_msg:
                 logger.warning(f"{symbol} | Header missing, retrying...")
                 time.sleep(1)
@@ -206,26 +211,23 @@ def fetch_daily_klines(symbol, retries=3, base_delay=1):
                 logger.warning(f"{symbol} | Empty daily kline response")
                 return None
 
-            time.sleep(0.3)  # keep your original delay
+            time.sleep(0.3)
             return raw
 
         except Exception as e:
             err_msg = str(e)
 
-            # 🔥 Rate limit handling
             if "10006" in err_msg or "Too many visits" in err_msg:
                 delay = base_delay * (attempt + 1)
                 logger.warning(f"{symbol} | Rate limited (daily), retrying in {delay}s...")
                 time.sleep(delay)
                 continue
 
-            # 🔥 Header / transient API issue
             elif "x-bapi-limit-reset-timestamp" in err_msg:
                 logger.warning(f"{symbol} | Header issue, retrying...")
                 time.sleep(1)
                 continue
 
-            # 🔥 Unknown error
             else:
                 logger.error(f"{symbol} | Daily kline fetch error: {e}")
                 return None
@@ -235,7 +237,7 @@ def fetch_daily_klines(symbol, retries=3, base_delay=1):
 
 def sl_too_small(entry, sl):
     sl_pct = abs(entry - sl) / entry
-    return sl_pct < 0.001  # 0.1%
+    return sl_pct < 0.001
 
 def find_structure_sl(symbol, entry, side, sl, lookback=20):
     candles = fetch_candles(symbol, interval=INTERVAL, limit=30)
@@ -274,7 +276,7 @@ def find_structure_sl(symbol, entry, side, sl, lookback=20):
 
     if not levels:
         return None
-        
+
     if levels:
         logger.info(f"levels fs: {levels}")
 
@@ -300,7 +302,6 @@ def find_consolidation_sl(symbol, entry, side, lookback=20, tolerance=0.002):
         zone_high = max(highs)
         zone_low = min(lows)
 
-        
         if (zone_high - zone_low) / zone_high < tolerance:
 
             if side == "BUY" and zone_low < entry:
@@ -311,11 +312,11 @@ def find_consolidation_sl(symbol, entry, side, lookback=20, tolerance=0.002):
 
     if not levels:
         return None
-        
+
     if levels:
         logger.info(f"levels fc: {levels}")
     return None
-    
+
 def get_symbol_specs(symbol):
     if symbol in symbol_specs:
         return symbol_specs[symbol]
@@ -359,7 +360,6 @@ def fetch_top_symbols():
             "volume": vol
         })
 
-    # rank by volume
     symbols.sort(key=lambda x: x["volume"], reverse=True)
 
     pairs = []
@@ -371,7 +371,6 @@ def fetch_top_symbols():
             specs = get_symbol_specs(sym)
             max_lev = specs["max_leverage"]
 
-            # ✅ FILTER HERE
             if max_lev < 50:
                 continue
 
@@ -382,21 +381,20 @@ def fetch_top_symbols():
 
             logger.info(f"Selected: {sym} | Max Lev: {max_lev}")
 
-            # ✅ STOP when we reach limit
             if len(pairs) >= MAX_SYMBOLS:
                 break
 
-            time.sleep(0.05)  # avoid rate limit
+            time.sleep(0.05)
 
         except Exception as e:
             logger.warning(f"{sym} | Spec fetch error: {e}")
 
     return pairs
+
 def refresh_symbol_universe_if_needed():
 
     global PAIRS, symbol_state, daily_fvg_state, last_daily_check, last_symbol_refresh_week
 
-    
     now = datetime.now(timezone.utc)
     week = (now.year, now.isocalendar()[1])
 
@@ -412,7 +410,6 @@ def refresh_symbol_universe_if_needed():
 
     PAIRS = new_pairs
 
-    
     for p in new_pairs:
         sym = p["symbol"]
         if sym not in symbol_state:
@@ -424,7 +421,7 @@ def refresh_symbol_universe_if_needed():
                 "last_candle_time": 0,
                 "buy_fvg_candle_time": None,
                 "sell_fvg_candle_time": None}
-            
+
         if sym not in daily_fvg_state:
             daily_fvg_state[sym] = {
                 "allow_buy": False,
@@ -436,7 +433,7 @@ def refresh_symbol_universe_if_needed():
                 "last_new_buy_fvg": None,
                 "last_new_sell_fvg": None
             }
-            
+
         if sym not in last_daily_check:
             last_daily_check[sym] = None
 
@@ -530,23 +527,17 @@ def get_real_balance():
     return 0.0
 
 def find_tp_buy(candles, entry):
-    # look for nearest swing high (last 10 candles)
     highs = [c["high"] for c in candles[-10:]]
     return max(highs)
 
 def find_tp_sell(candles, entry):
-    # look for nearest swing low (last 10 candles)
     lows = [c["low"] for c in candles[-10:]]
     return min(lows)
 
 def calculate_signal_score(entry, fvg_low, fvg_high):
 
     fvg_size = abs(fvg_high - fvg_low)
-
-    # normalize to price so large coins don't dominate
     size_ratio = fvg_size / entry
-
-    # bigger gap = stronger imbalance
     score = size_ratio * 1000
 
     return score
@@ -604,7 +595,7 @@ def update_trade_progress(symbol, candles):
         one_r = entry - (sl - entry)
         if last["low"] <= one_r:
             t["reached_1R"] = True
- 
+
 def update_trailing_sl():
     positions = get_open_positions()
 
@@ -615,11 +606,10 @@ def update_trailing_sl():
         if size == 0:
             continue
 
-        side = pos["side"]  # "Buy" or "Sell"
+        side = pos["side"]
         entry = float(pos["avgPrice"])
         current_sl = float(pos.get("stopLoss", 0) or 0)
 
-        # Normalize side
         side_clean = "BUY" if side == "Buy" else "SELL"
 
         new_swing = find_latest_swing_30m(symbol, side_clean)
@@ -627,33 +617,24 @@ def update_trailing_sl():
         if new_swing is None:
             continue
 
-        # =========================
-        # BUY LOGIC
-        # =========================
         if side_clean == "BUY":
-            # only move SL UP
             if new_swing > current_sl and new_swing < entry:
                 new_sl = new_swing
-
             else:
                 continue
 
-        # =========================
-        # SELL LOGIC
-        # =========================
         else:
-            # only move SL DOWN
             if (current_sl == 0 or new_swing < current_sl) and new_swing > entry:
                 new_sl = new_swing
             else:
                 continue
+
         if abs(new_sl - current_sl) / entry < 0.001:
             continue
-        # =========================
-        # APPLY UPDATE
-        # =========================
+
         if symbol in trade_state:
             update_recovery_order(symbol, new_sl)
+
         try:
             session.set_trading_stop(
                 category="linear",
@@ -667,31 +648,86 @@ def update_trailing_sl():
         except Exception as e:
             logger.error(f"{symbol} | SL update failed: {e}")
 
+
+# ===========================
+# RECOVERY ORDER (REWRITTEN)
+# ===========================
+
 def place_recovery_order(symbol):
+    """
+    Places a CONDITIONAL recovery order opposite to the open trade.
+
+    Rules:
+      - Entry      : SL of the current open trade  (triggerPrice activates it)
+      - SL         : latest structure swing in the recovery direction
+      - Qty        : weekly_rf / risk_distance  (same fixed-risk sizing as main trades)
+      - TP         : 1:1 from entry  (entry ± risk_distance)
+      - Order type : conditional limit — only fires when price touches the SL level
+    """
     if symbol not in trade_state:
         return
 
     t = trade_state[symbol]
 
-    # ❌ DO NOT place if 1R already reached
-
     entry = t["entry"]
-    sl = t["sl"]
-    side = t["side"]
-    qty = t["qty"]
+    sl    = t["sl"]
+    side  = t["side"]
 
+    # Recovery direction is always opposite the original trade
     if side == "BUY":
-        rec_side = "Sell"
-        rec_entry = sl
-        rec_sl = entry
-        rec_tp = rec_entry - (rec_sl - rec_entry)  # 1:1
+        rec_side     = "Sell"
         position_idx = 2
+        swing_side   = "SELL"   # look for swing HIGH above rec_entry
     else:
-        rec_side = "Buy"
-        rec_entry = sl
-        rec_sl = entry
-        rec_tp = rec_entry + (rec_entry - rec_sl)
+        rec_side     = "Buy"
         position_idx = 1
+        swing_side   = "BUY"    # look for swing LOW below rec_entry
+
+    rec_entry = sl  # conditional trigger price = original SL
+
+    # ── Structure SL ────────────────────────────────────────────────────────
+    rec_sl = find_structure_sl(symbol, rec_entry, swing_side, rec_entry)
+
+    if rec_sl is None:
+        logger.warning(f"{symbol} | Recovery: no structure SL found, skipping")
+        return
+
+    risk_distance = abs(rec_entry - rec_sl)
+
+    # Guard: SL too close → qty would blow up
+    if risk_distance / rec_entry < 0.001:
+        logger.warning(f"{symbol} | Recovery: risk distance < 0.1%, skipping")
+        return
+
+    # ── Sizing: same fixed-risk as main trades ───────────────────────────────
+    specs    = get_symbol_specs(symbol)
+    leverage = specs["max_leverage"]
+
+    raw_qty = weekly_rf / risk_distance
+    qty     = round_qty(symbol, raw_qty)
+    qty     = fit_qty_to_margin(symbol, rec_entry, leverage, qty)
+
+    if qty is None or qty <= 0:
+        logger.warning(f"{symbol} | Recovery: not enough margin, skipping")
+        return
+
+    # ── TP: 1:1 RR ───────────────────────────────────────────────────────────
+    if rec_side == "Sell":
+        rec_tp = rec_entry - risk_distance
+    else:
+        rec_tp = rec_entry + risk_distance
+
+    # ── triggerDirection: 1 = price falls to trigger (Buy rec), 2 = rises ───
+    # For a BUY trade that hits SL, price is falling → recovery is Sell
+    # triggered when price falls to rec_entry → triggerDirection = 2
+    # For a SELL trade that hits SL, price is rising → recovery is Buy
+    # triggered when price rises to rec_entry → triggerDirection = 1
+    trigger_direction = 2 if rec_side == "Sell" else 1
+
+    logger.info(
+        f"{symbol} | Placing CONDITIONAL recovery {rec_side} | "
+        f"entry={rec_entry} sl={rec_sl} tp={rec_tp} qty={qty}"
+    )
 
     try:
         resp = session.place_order(
@@ -700,6 +736,8 @@ def place_recovery_order(symbol):
             side=rec_side,
             orderType="Limit",
             price=str(rec_entry),
+            triggerPrice=str(rec_entry),        # ← makes it conditional
+            triggerDirection=trigger_direction,  # ← price direction to activate
             qty=str(qty),
             timeInForce="GTC",
             positionIdx=position_idx
@@ -708,16 +746,61 @@ def place_recovery_order(symbol):
         order_id = resp["result"]["orderId"]
 
         recovery_orders[symbol] = {
-            "order_id": order_id,
-            "side": rec_side,
-            "entry": rec_entry,
-            "qty": qty
+            "order_id":  order_id,
+            "side":      rec_side,
+            "entry":     rec_entry,
+            "sl":        rec_sl,
+            "tp":        rec_tp,
+            "qty":       qty
         }
 
-        logger.info(f"{symbol} | Recovery order placed")
+        # Attach TP/SL to the conditional order via trading-stop
+        # (Bybit attaches these to the position once the order fills)
+        logger.info(f"{symbol} | Recovery order placed (order_id={order_id})")
 
     except Exception as e:
         logger.error(f"{symbol} | Recovery order error: {e}")
+
+
+def cancel_recovery_order(symbol):
+    """
+    Cancels ANY existing recovery order for this symbol, regardless of side.
+    Always call this before placing a new recovery order or opening a new trade.
+    """
+    if symbol not in recovery_orders:
+        return
+
+    rec = recovery_orders[symbol]
+
+    try:
+        session.cancel_order(
+            category=CATEGORY,
+            symbol=symbol,
+            orderId=rec["order_id"]
+        )
+        logger.info(f"{symbol} | Recovery order cancelled (order_id={rec['order_id']})")
+    except Exception as e:
+        # Silently ignore if already filled / already gone
+        logger.debug(f"{symbol} | Cancel recovery order (may already be gone): {e}")
+    finally:
+        del recovery_orders[symbol]
+
+
+def update_recovery_order(symbol, new_sl):
+    """
+    Called when the main trade's SL is trailed to a new level.
+    Cancels the old conditional order and places a fresh one with the updated SL.
+    """
+    if symbol not in trade_state:
+        return
+
+    # Update the stored SL so place_recovery_order uses the new value
+    trade_state[symbol]["sl"] = new_sl
+
+    # Cancel old order (if any) then place fresh one
+    cancel_recovery_order(symbol)
+    place_recovery_order(symbol)
+
 
 def position_exists(symbol, side):
 
@@ -728,7 +811,7 @@ def position_exists(symbol, side):
             if size > 0 and pos_side == side:
                 return True
     return False
-    
+
 def lock_weekly_rf_if_needed():
     global current_week, weekly_rf, siphoned_cash
 
@@ -743,13 +826,11 @@ def lock_weekly_rf_if_needed():
 
         real_balance = get_real_balance()
 
-        # siphon 25%
         siphon_amount = real_balance * 0
         siphoned_cash += siphon_amount
 
-        effective_balance = real_balance 
+        effective_balance = real_balance
         weekly_rf = round(effective_balance * RF_PERCENT, 6)
-        # weekly_rf = 10
 
         logger.info("===========================================")
         logger.info(f"NEW WEEK LOCKED: {current_week}")
@@ -763,7 +844,6 @@ def refresh_account_cache():
     global account_cache
 
     try:
-        # Positions
         pos_resp = session.get_positions(
             category="linear",
             settleCoin="USDT"
@@ -772,7 +852,6 @@ def refresh_account_cache():
 
         account_cache["positions"] = pos_resp["result"]["list"]
 
-        # Wallet / margin
         wallet = session.get_wallet_balance(accountType="UNIFIED")
         data = wallet["result"]["list"][0]
 
@@ -783,37 +862,28 @@ def refresh_account_cache():
 
     except Exception as e:
         logger.error(f"Account cache refresh failed: {e}")
-        
+
 def update_daily_bias(symbol):
     global daily_fvg_state, last_daily_check
 
     utc_plus_1 = timezone(timedelta(hours=1))
     now = datetime.now(utc_plus_1)
     today = now.date()
-    
-    # -------------------------
-    # FIRST STARTUP RUN
-    # -------------------------
+
     if last_daily_check[symbol] is None:
         logger.info(f"{symbol} | First startup daily bias scan")
         run_daily_fvg_scan(symbol, today)
         last_daily_check[symbol] = today
         return
 
-    # -------------------------
-    # ONLY RUN AT 01:00
-    # -------------------------
     if not (now.hour == 1 and now.minute < 5):
         return
 
-    # -------------------------
-    # RUN ONCE PER DAY
-    # -------------------------
     if last_daily_check[symbol] == today:
         return
 
     logger.info(f"{symbol} | E")
-    
+
     logger.info(f"{symbol} | Running scheduled daily bias scan")
 
     run_daily_fvg_scan(symbol, today)
@@ -848,7 +918,7 @@ def find_tp_sell_30m(symbol, entry, sl):
         if c["low"] <= normal_tp:
             return c["low"]
 
-    return normal_tp  # fallback
+    return normal_tp
 
 def find_tp_buy_30m(symbol, entry, sl):
     candles_30m = fetch_30m_candles(symbol)
@@ -860,7 +930,7 @@ def find_tp_buy_30m(symbol, entry, sl):
         if c["high"] >= normal_tp:
             return c["high"]
 
-    return normal_tp  # fallback
+    return normal_tp
 
 def find_tp_structure_30m(symbol, entry, side, tp):
     candles = fetch_30m_candles(symbol)
@@ -886,7 +956,7 @@ def find_tp_structure_30m(symbol, entry, side, tp):
                         c["low"] < candles[i+1]["low"])
                     if is_low and c["low"] < entry:
                         levels.append(c["low"])
-                        
+
     if not levels:
         return None
     logger.info(f"levels ftp: {levels}")
@@ -901,7 +971,6 @@ def process_signal_queue():
     if len(signal_queue) == 0:
         return
 
-    # sort strongest first
     signal_queue.sort(key=lambda x: x["score"], reverse=True)
 
     open_positions = get_total_open_positions()
@@ -940,8 +1009,7 @@ def process_signal_queue():
 def run_daily_fvg_scan(symbol, today):
 
     yesterday = today - timedelta(days=1)
-    
-    # Expire old permissions
+
     if daily_fvg_state[symbol]["last_new_buy_fvg"]:
         age_days = (today - daily_fvg_state[symbol]["last_new_buy_fvg"]).days
         logger.info(f"{symbol} | AGE DAYS {age_days}")
@@ -959,7 +1027,7 @@ def run_daily_fvg_scan(symbol, today):
     raw = fetch_daily_klines(symbol)
     if not raw:
         return
-        
+
     candles = list(reversed(raw))
 
     df = pd.DataFrame([{
@@ -978,11 +1046,11 @@ def run_daily_fvg_scan(symbol, today):
     c2 = df.iloc[-5]
     c4 = df.iloc[-3]
 
-    logger.info(f"{symbol} c1: {c1["open"]}")
-    logger.info(f"{symbol} c2: {c2["open"]}")
-    logger.info(f"{symbol} c3: {c3["open"]}")
-    logger.info(f"{symbol} c4: {c4["open"]}")
-    
+    logger.info(f"{symbol} c1: {c1['open']}")
+    logger.info(f"{symbol} c2: {c2['open']}")
+    logger.info(f"{symbol} c3: {c3['open']}")
+    logger.info(f"{symbol} c4: {c4['open']}")
+
     sell_fvg_exists = c1["low"] > c3["high"]
     buy_fvg_exists = c1["high"] < c3["low"]
 
@@ -992,10 +1060,10 @@ def run_daily_fvg_scan(symbol, today):
     if buy_fvg_exists:
         daily_fvg_state[symbol]["allow_buy"] = True
         daily_fvg_state[symbol]["last_new_buy_fvg"] = today
-        
+
         daily_fvg_state[symbol]["buy_fvg_high"] = c3["low"]
         daily_fvg_state[symbol]["buy_fvg_low"] = c1["high"]
-        
+
         logger.info(f"{symbol} Daily BUY FVG detected")
 
     if sell_fvg_exists:
@@ -1004,9 +1072,9 @@ def run_daily_fvg_scan(symbol, today):
 
         daily_fvg_state[symbol]["sell_fvg_high"] = c1["low"]
         daily_fvg_state[symbol]["sell_fvg_low"] = c3["high"]
-        
+
         logger.info(f"{symbol} Daily SELL FVG detected")
-        
+
     if prev_day_buy_fvg_exists:
         daily_fvg_state[symbol]["allow_buy"] = True
         daily_fvg_state[symbol]["last_new_buy_fvg"] = yesterday
@@ -1018,7 +1086,7 @@ def run_daily_fvg_scan(symbol, today):
         daily_fvg_state[symbol]["last_new_sell_fvg"] = yesterday
         logger.info(f"{symbol} Previous Day Daily SELL FVG detected")
         logger.info(f"{symbol} Yesterday date is {yesterday}")
-            
+
 def log_candles(symbol, candles):
     logger.info(f"{symbol} | Retrieved {len(candles)} candles (oldest -> newest).")
     for c in candles:
@@ -1032,7 +1100,7 @@ def round_qty(symbol, qty):
     min_qty = Decimal(str(specs["min_qty"]))
     qty = Decimal(str(qty))
 
-    qty = (qty // step) * step  # floor to step
+    qty = (qty // step) * step
 
     if qty < min_qty:
         qty = min_qty
@@ -1043,7 +1111,7 @@ def get_margin_usage():
     total = account_cache["wallet_balance"]
     used = account_cache["used_margin"]
     return total, used
-    
+
 def margin_available_for_trade(required_margin):
 
     total, used = get_margin_usage()
@@ -1082,8 +1150,6 @@ def fit_qty_to_margin(symbol, price, leverage, desired_qty):
     if ok:
         return desired_qty
 
-    # reduce qty to fit remaining margin
-
     new_position_value = allowed_margin * leverage
     new_qty = new_position_value / price
 
@@ -1110,98 +1176,6 @@ def is_position_open(symbol):
             return True
     return False
 
-def place_recovery_order(symbol):
-    if symbol not in trade_state:
-        return
-
-    t = trade_state[symbol]
-
-    entry = t["entry"]
-    sl = t["sl"]
-    side = t["side"]
-    loss = abs(t["entry"] - t["sl"]) * t["qty"]
-    specs = get_symbol_specs(symbol)
-    leverage = specs["max_leverage"]
-    if side == "BUY":
-        rec_side = "Sell"
-        rec_entry = sl
-        rec_tp = find_tp_structure_30m(symbol, entry, "SELL", rec_entry)
-        position_idx = 2
-    else:
-        rec_side = "Buy"
-        rec_entry = sl
-        rec_tp = find_tp_structure_30m(symbol, entry, "BUY", rec_entry)
-        position_idx = 1
-    chosen_sl = find_structure_sl(symbol, entry, "SELL", rec_entry) if side == "BUY" else find_structure_sl(symbol, entry, "BUY", rec_entry)
-       
-    logger.info(f"recovery chosen sl: {chosen_sl}")
-
-    real_sl = chosen_sl
-            
-    logger.info(f"{symbol} | RECOVERY STRUCTURE SL: {real_sl}")
-            
-    risk_sl = real_sl * (1 - (SL_BUFFER * 2))
-            
-    risk_amount = weekly_rf
-    raw_qty = risk_amount / abs(entry - risk_sl)
-    recovery_qty = loss / (rec_entry - rec_tp)
-    recovery_qty = round_qty(symbol, recovery_qty)
-    recovery_qty = fit_qty_to_margin(symbol, rec_entry, leverage, recovery_qty)
-    if recovery_qty <= 0:
-        return
-    if recovery_qty is None:
-        return
-    qty = recovery_qty
- 
-    try:
-        resp = session.place_order(
-            category=CATEGORY,
-            symbol=symbol,
-            side=rec_side,
-            orderType="Limit",
-            price=str(rec_entry),
-            qty=str(qty),
-            timeInForce="GTC",
-            positionIdx=position_idx
-        )
-
-        order_id = resp["result"]["orderId"]
-
-        recovery_orders[symbol] = {
-            "order_id": order_id,
-            "side": rec_side,
-            "entry": rec_entry,
-            "qty": qty
-        }
-
-        logger.info(f"{symbol} | Recovery order placed")
-
-    except Exception as e:
-        logger.error(f"{symbol} | Recovery order error: {e}")
-
-def update_recovery_order(symbol, new_sl):
-    if symbol not in recovery_orders or symbol not in trade_state:
-        return
-
-    rec = recovery_orders[symbol]
-    t = trade_state[symbol]
-
-    # cancel old
-    try:
-        session.cancel_order(
-            category=CATEGORY,
-            symbol=symbol,
-            orderId=rec["order_id"]
-        )
-    except:
-        pass
-
-    # update SL
-    t["sl"] = new_sl
-
-    # place new one
-    place_recovery_order(symbol)
- 
 def simulate_and_resolve_trade(symbol, side, entry_index, entry, sl, tp, candles):
     for j in range(entry_index + 1, len(candles)):
         high = candles[j]["high"]
@@ -1220,21 +1194,17 @@ def simulate_and_resolve_trade(symbol, side, entry_index, entry, sl, tp, candles
     return "OPEN", None
 
 def calculate_liquidation_price(entry, qty, side, leverage, available_balance):
-    """
-    Approximate liquidation price for cross + hedge mode
-    """
-
     position_value = entry * qty
-    im = 1 / leverage  # initial margin rate
-    mmr = 0.005        # your 0.5% maintenance margin
+    im = 1 / leverage
+    mmr = 0.005
 
     extra_margin_ratio = available_balance / position_value
 
     effective_buffer = im + extra_margin_ratio - mmr
 
-    if side == "Buy":  # LONG
+    if side == "Buy":
         lp = entry * (1 - effective_buffer)
-    else:  # SHORT
+    else:
         lp = entry * (1 + effective_buffer)
 
     return lp
@@ -1248,7 +1218,7 @@ def handle_symbol(pair):
     symbol = pair["symbol"]
     leverage = pair.get("leverage", 1)
     state = symbol_state[symbol]
-    
+
     candles = fetch_candles(symbol, interval=INTERVAL, limit=CANDLE_LIMIT)
     if len(candles) < 5:
         logger.warning(f"{symbol} | Not enough candles fetched ({len(candles)}). Skipping this cycle.")
@@ -1262,7 +1232,7 @@ def handle_symbol(pair):
         return
 
     last_closed = closed_candles[-1]
-    
+
     if daily_fvg_state[symbol]["allow_buy"]:
         current_price = last_closed["low"]
         if daily_fvg_state[symbol]["buy_fvg_high"]:
@@ -1270,7 +1240,7 @@ def handle_symbol(pair):
             if high is not None and current_price <= high:
                 daily_fvg_state[symbol]["allow_buy"] = False
                 logger.info(f"{symbol} BUY FVG invalidated (price reached daily fvg upper boundary)")
-            
+
     if daily_fvg_state[symbol]["allow_sell"]:
         current_price = last_closed["high"]
         if daily_fvg_state[symbol]["sell_fvg_low"]:
@@ -1279,7 +1249,7 @@ def handle_symbol(pair):
                 daily_fvg_state[symbol]["allow_sell"] = False
                 logger.info(f"{symbol} SELL FVG invalidated (price reached daily fvg lower boundary)")
 
-    
+
     prev1 = closed_candles[-1]
     prev2 = closed_candles[-3]
     logger.info(f"{symbol} | prev2 H:{prev2['high']} L:{prev2['low']} | prev1 H:{prev1['high']} L:{prev1['low']}")
@@ -1294,28 +1264,25 @@ def handle_symbol(pair):
 
     body = abs(prev1["close"] - prev1["open"])
     range_ = prev1["high"] - prev1["low"]
-    
+
     if range_ == 0:
         return
-        
+
     body_ratio = body / range_
-    
+
     bull_displacement = (
         prev1["close"] > prev1["open"] and
         body_ratio > 0.1 and
         prev1["close"] > prev2["high"])
-    
+
     bear_displacement = (
         prev1["close"] < prev1["open"] and
         body_ratio > 0.1 and
         prev1["close"] < prev2["low"])
-    
+
     bull_fvg = prev1["low"] > prev2["high"] and bull_displacement
     bear_fvg = prev1["high"] < prev2["low"] and bear_displacement
-    
-    # -----------------------
-    # BUY FVG
-    # -----------------------
+
     if bull_fvg:
         new_low = prev2["high"]
         new_high = prev1["low"]
@@ -1338,9 +1305,6 @@ def handle_symbol(pair):
             logger.info(f"{symbol} | FVG too small, skipping")
             return
 
-    # -----------------------
-    # SELL FVG
-    # -----------------------
     if bear_fvg:
         new_high = prev2["low"]
         new_low = prev1["high"]
@@ -1363,9 +1327,6 @@ def handle_symbol(pair):
             logger.info(f"{symbol} | FVG too small, skipping")
             return
 
-    # -----------------------
-    # TAP CHECK
-    # -----------------------
     if state["buy_fvg"] and not state["buy_fvg"]["tapped"]:
         bf = state["buy_fvg"]
         if last_closed["time"] != state["buy_fvg_candle_time"]:
@@ -1394,9 +1355,6 @@ def handle_symbol(pair):
             else:
                 sf["deepest_touch"] = max(sf["deepest_touch"], last_closed["high"])
 
-    # -----------------------
-    # FVG INVALIDATION
-    # -----------------------
     if state["buy_fvg"]:
         bf = state["buy_fvg"]
         if last_closed["low"] < bf["low"]:
@@ -1410,19 +1368,18 @@ def handle_symbol(pair):
             state["sell_fvg"] = None
 
     # -----------------------
-    # CONFIRMATION (OPEN PAPER/REAL TRADE)
+    # BUY CONFIRMATION
     # -----------------------
-    # BUY confirmation
     if state["buy_fvg"] and state["buy_fvg"]["tapped"] and not position_exists(symbol, "Buy") and last_closed["time"] != state["buy_fvg_candle_time"]:
         bf = state["buy_fvg"]
-        
+
         if bf["deepest_touch"] is None or bf["deepest_touch"] > bf["mid"]:
             if not (last_closed["close"] > bf["high"]):
                 logger.info(f"{symbol} | BUY ignored: price did not reach FVG mid")
             return
-        
+
         if bf["deepest_touch"] is not None:
-            extreme_not_touched = bf["deepest_touch"] > bf["low"]    # did not touch extreme low
+            extreme_not_touched = bf["deepest_touch"] > bf["low"]
             if not extreme_not_touched:
                 if not (last_closed["close"] > bf["high"]):
                     logger.info(f"{symbol} | BUY ignored: touched extreme")
@@ -1431,52 +1388,51 @@ def handle_symbol(pair):
         if not daily_fvg_state[symbol]["allow_buy"]:
             logger.info(f"{symbol} | Daily bias does not allow BUY, skipping")
             return
-            
+
         if last_closed["close"] > bf["high"]:
             entry = last_closed["close"]
-            
+
             deep = bf["deepest_touch"]
-            
+
             if deep is None:
                 logger.info(f"{symbol} | BUY ignored: no deepest touch recorded")
                 return
             sl = bf["low"]
             chosen_sl = find_structure_sl(symbol, entry, "BUY", sl)
-       
+
             logger.info(f"chosen sl: {chosen_sl}")
 
-                
             real_sl = chosen_sl if chosen_sl else min(
                 bf["low"],
                 prev2["low"],
                 bf["deepest_touch"])
-            
+
             logger.info(f"{symbol} | STRUCTURE SL (BUY): {real_sl}")
-            
+
             risk_sl = real_sl * (1 - (SL_BUFFER * 2))
-            
+
             risk_amount = weekly_rf
             raw_qty = risk_amount / abs(entry - risk_sl)
-            
+
             specs = get_symbol_specs(symbol)
             step = specs["qty_step"]
-            
+
             qty = round_qty(symbol, raw_qty)
-            qty = fit_qty_to_margin(     
-                symbol,     
-                entry,   
-                leverage, 
-                qty) 
-            if qty is None:  
-                logger.info(f"{symbol} | Not enough margin for trade")  
+            qty = fit_qty_to_margin(
+                symbol,
+                entry,
+                leverage,
+                qty)
+            if qty is None:
+                logger.info(f"{symbol} | Not enough margin for trade")
                 return
 
             if not trade_value_ok(entry, qty):
                 logger.info(f"{symbol} | Trade value < $5. Skipping")
                 return
-            
-            sl = real_sl * (1 - SL_BUFFER)  # this is what will be sent to exchange
-            
+
+            sl = real_sl * (1 - SL_BUFFER)
+
             state["buy_fvg"] = None
             if sl_too_small(entry, real_sl):
                 logger.info(f"{symbol} | BUY skipped: SL distance < 0.1%")
@@ -1488,7 +1444,7 @@ def handle_symbol(pair):
 
             if abs(tp - entry) < 2 * abs(entry - sl):
                 logger.info(f"{symbol} | BUY skipped: RR too low after liquidity TP")
-                return  # skip weak trade
+                return
             logger.info(f"{symbol} | BUY CONFIRMED | entry={entry} sl={sl} tp={tp}")
             if USE_REAL_TRADING and position_exists(symbol, "Sell"):
                 try:
@@ -1502,31 +1458,31 @@ def handle_symbol(pair):
                         reduceOnly=True,
                         positionIdx=2
                     )
-                    time.sleep(0.2)  # small delay for safety
+                    time.sleep(0.2)
                 except Exception as e:
                     logger.error(f"{symbol} | Failed closing SELL: {e}")
             if USE_REAL_TRADING:
-                available_balance = get_real_balance()  # use your balance function
-                risk_amount = weekly_rf  # your frozen risk
+                available_balance = get_real_balance()
+                risk_amount = weekly_rf
                 raw_qty = risk_amount / abs(entry - risk_sl)
-                    
+
                 specs = get_symbol_specs(symbol)
                 step = specs["qty_step"]
-                
+
                 qty = round_qty(symbol, raw_qty)
-                qty = fit_qty_to_margin(     
-                    symbol,     
-                    entry,   
-                    leverage, 
-                    qty) 
-                if qty is None:  
-                    logger.info(f"{symbol} | Not enough margin for trade")                          
+                qty = fit_qty_to_margin(
+                    symbol,
+                    entry,
+                    leverage,
+                    qty)
+                if qty is None:
+                    logger.info(f"{symbol} | Not enough margin for trade")
                     return
 
                 if not trade_value_ok(entry, qty):
                     logger.info(f"{symbol} | Trade value < $5. Skipping")
                     return
-                    
+
                 lp = calculate_liquidation_price(
                     entry=entry,
                     qty=qty,
@@ -1534,11 +1490,11 @@ def handle_symbol(pair):
                     leverage=leverage,
                     available_balance=available_balance)
                 distance_to_lp_pct = abs((sl - lp) / entry)
-                if distance_to_lp_pct < 0.003:  # 0.1%
+                if distance_to_lp_pct < 0.003:
                     logger.info(f"{symbol} | Skipping BUY - SL too close to liquidation ({distance_to_lp_pct*100:.3f}%)")
                     return
                 score = calculate_signal_score(entry, bf["low"], bf["high"])
-                    
+
                 signal_queue.append({
                     "symbol": symbol,
                     "side": "BUY",
@@ -1557,21 +1513,22 @@ def handle_symbol(pair):
                     "sl": sl,
                     "tp": tp,
                     "score": score,
-                     "qty": qty,
+                    "qty": qty,
                     "leverage": leverage})
                 logger.info(f"{symbol} BUY signal queued | score={score:.4f}")
         else:
             logger.info(f"{symbol} | BUY confirmation ignored: SL too tight")
 
-    # SELL confirmation
+    # -----------------------
+    # SELL CONFIRMATION
+    # -----------------------
     if state["sell_fvg"] and state["sell_fvg"]["tapped"] and not position_exists(symbol, "Sell") and last_closed["time"] != state["sell_fvg_candle_time"]:
         sf = state["sell_fvg"]
-        
+
         if sf["deepest_touch"] is None or sf["deepest_touch"] < sf["mid"]:
             if not (last_closed["close"] < sf["low"]):
                 logger.info(f"{symbol} | SELL ignored: price did not reach FVG mid")
             return
-
 
         if sf["deepest_touch"] is not None:
             extreme_not_touched = sf["deepest_touch"] < sf["high"]
@@ -1583,50 +1540,49 @@ def handle_symbol(pair):
         if not daily_fvg_state[symbol]["allow_sell"]:
             logger.info(f"{symbol} | Daily bias does not allow SELL, skipping")
             return
-            
+
         if last_closed["close"] < sf["low"]:
             entry = last_closed["close"]
 
-            
             deep = sf["deepest_touch"]
-            
+
             if deep is None:
                 logger.info(f"{symbol} | SELL ignored: no deepest touch recorded")
                 return
-            sl = sf["high"] 
-            chosen_sl = find_structure_sl(symbol, entry, "SELL", sl)      
-                
+            sl = sf["high"]
+            chosen_sl = find_structure_sl(symbol, entry, "SELL", sl)
+
             logger.info(f"chosen sl: {chosen_sl}")
-                
+
             real_sl = chosen_sl if chosen_sl else max(
                 sf["high"],
                 prev2["high"],
                 sf["deepest_touch"])
-            
+
             logger.info(f"{symbol} | STRUCTURE SL (SELL): {real_sl}")
-                
+
             risk_sl = real_sl * (1 + (SL_BUFFER * 2))
-            
+
             risk_amount = weekly_rf
             raw_qty = risk_amount / abs(entry - risk_sl)
-            
+
             specs = get_symbol_specs(symbol)
             step = specs["qty_step"]
-            
-            qty = round_qty(symbol, raw_qty)  
-            qty = fit_qty_to_margin(     
-                symbol,   
-                entry,    
-                leverage,   
-                qty) 
-            if qty is None:  
-                logger.info(f"{symbol} | Not enough margin for trade")  
+
+            qty = round_qty(symbol, raw_qty)
+            qty = fit_qty_to_margin(
+                symbol,
+                entry,
+                leverage,
+                qty)
+            if qty is None:
+                logger.info(f"{symbol} | Not enough margin for trade")
                 return
 
             if not trade_value_ok(entry, qty):
                 logger.info(f"{symbol} | Trade value < $5. Skipping")
                 return
-                
+
             sl = real_sl * (1 + SL_BUFFER)
 
             state["sell_fvg"] = None
@@ -1640,8 +1596,8 @@ def handle_symbol(pair):
 
             if abs(tp - entry) < 2 * abs(entry - sl):
                 logger.info(f"{symbol} | SELL skipped: RR too low after liquidity TP")
-                return  # skip weak trade
-            
+                return
+
             logger.info(f"{symbol} | SELL CONFIRMED | entry={entry} sl={sl} tp={tp}")
             if USE_REAL_TRADING and position_exists(symbol, "Buy"):
                 try:
@@ -1658,39 +1614,39 @@ def handle_symbol(pair):
                 except Exception as e:
                     logger.error(f"{symbol} | Failed closing BUY: {e}")
             if USE_REAL_TRADING:
-                available_balance = get_real_balance()  # use your balance function
-                risk_amount = weekly_rf  # your frozen risk
+                available_balance = get_real_balance()
+                risk_amount = weekly_rf
                 raw_qty = risk_amount / abs(entry - risk_sl)
-                    
+
                 specs = get_symbol_specs(symbol)
                 step = specs["qty_step"]
-                qty = round_qty(symbol, raw_qty) 
-                qty = fit_qty_to_margin(   
-                    symbol,  
-                    entry,   
+                qty = round_qty(symbol, raw_qty)
+                qty = fit_qty_to_margin(
+                    symbol,
+                    entry,
                     leverage,
-                    qty) 
-                if qty is None:   
-                    logger.info(f"{symbol} | Not enough margin for trade")  
+                    qty)
+                if qty is None:
+                    logger.info(f"{symbol} | Not enough margin for trade")
                     return
 
                 if not trade_value_ok(entry, qty):
                     logger.info(f"{symbol} | Trade value < $5. Skipping")
                     return
-                    
+
                 lp = calculate_liquidation_price(
                     entry=entry,
                     qty=qty,
                     side="Sell",
                     leverage=leverage,
                     available_balance=available_balance)
-                
+
                 distance_to_lp_pct = abs((lp - sl) / entry)
-                    
+
                 if distance_to_lp_pct < 0.003:
                     logger.info(f"{symbol} | Skipping SELL - SL too close to liquidation ({distance_to_lp_pct*100:.3f}%)")
                     return
-                score = calculate_signal_score(entry, sf["low"], sf["high"])                    
+                score = calculate_signal_score(entry, sf["low"], sf["high"])
                 signal_queue.append({
                     "symbol": symbol,
                     "side": "SELL",
@@ -1715,20 +1671,16 @@ def handle_symbol(pair):
                 logger.info(f"{symbol} SELL signal queued | score={score:.4f}")
         else:
             logger.info(f"{symbol} | SELL confirmation ignored: SL too tight")
-    
+
+
 def place_real_trade(symbol, side, entry, sl, tp, leverage, frozen_risk, qty):
 
     side = side.upper()
 
+    # ── FIX: Cancel ANY existing recovery order, regardless of its side ──────
     if symbol in recovery_orders:
-        rec = recovery_orders[symbol]
-        if rec["side"].upper() == side:
-            session.cancel_order(
-                category=CATEGORY,
-                symbol=symbol,
-                orderId=rec["order_id"]
-                )
-        del recovery_orders[symbol]
+        cancel_recovery_order(symbol)
+
     if get_total_open_positions() >= MAX_ACTIVE_TRADES:
         logger.info(f"Max {MAX_ACTIVE_TRADES} open trades reached. Skipping.")
         return
@@ -1765,17 +1717,11 @@ def place_real_trade(symbol, side, entry, sl, tp, leverage, frozen_risk, qty):
         logger.info(f"{symbol} | Frozen Risk: ${frozen_risk:.4f}")
         logger.info(f"{symbol} | Qty: {qty}")
 
-        # =============================
-        # SIMULATION MODE
-        # =============================
         if not USE_REAL_TRADING:
             logger.info(f"[SIMULATED] {symbol} {side} | entry={entry} sl={sl} tp={tp} qty={qty}")
             refresh_account_cache()
             return
 
-        # =============================
-        # REAL EXECUTION
-        # =============================
         order_response = session.place_order(
             category=CATEGORY,
             symbol=symbol,
@@ -1801,15 +1747,26 @@ def place_real_trade(symbol, side, entry, sl, tp, leverage, frozen_risk, qty):
         refresh_account_cache()
 
         logger.info(f"{symbol} | REAL {side} ORDER PLACED | TP={tp} SL={sl}")
-        trade_state[symbol] = {
-            "entry": entry,
-            "sl": sl,
-            "side": side,
-            "reached_1R": False,
-            "qty": qty}
-    except Exception as e:
-        logger.error(f"{symbol} | Order error: {e}")# MAIN LOOP
 
+        # Save trade state
+        trade_state[symbol] = {
+            "entry":      entry,
+            "sl":         sl,
+            "side":       side,
+            "reached_1R": False,
+            "qty":        qty
+        }
+
+        # ── Place conditional recovery order immediately after trade opens ──
+        place_recovery_order(symbol)
+
+    except Exception as e:
+        logger.error(f"{symbol} | Order error: {e}")
+
+
+# ===========================
+# MAIN LOOP
+# ===========================
 def main():
     global balance, daily_rf, last_scan, eligible_pairs
 
@@ -1818,17 +1775,15 @@ def main():
     logger.info(f"STARTUP BALANCE = ${real_balance:.4f}")
     refresh_account_cache()
     ensure_hedge_mode()
-    # Lock initial daily RF for current UTC day
-    # update_daily_bias()
 
     refresh_symbol_universe_if_needed()
 
     for p in PAIRS:
         logger.info(f"Symbol loaded: {p['symbol']} | leverage: {p['leverage']}")
-    
+
     for p in PAIRS:
         get_symbol_specs(p["symbol"])
-        
+
     for p in PAIRS:
         set_symbol_leverage(p["symbol"], p["leverage"])
         time.sleep(0.2)
@@ -1837,51 +1792,43 @@ def main():
     try:
         while True:
             refresh_symbol_universe_if_needed()
-            
-            # wait until next candle close (UTC)
+
             wait = seconds_until_next_candle(INTERVAL)
             logger.info(f"Waiting {wait}s for next {INTERVAL}m candle close (UTC)...")
-            time.sleep(wait + 0.8)  # small offset to ensure candle is closed on exchange
+            time.sleep(wait + 0.8)
 
             refresh_account_cache()
             update_trailing_sl()
+
             for p in PAIRS:
                 symbol = p["symbol"]
                 candles = fetch_candles(symbol)
-                
+
                 update_trade_progress(symbol, candles)
-                if symbol not in recovery_orders:
+
+                # Ensure recovery order exists for every open trade
+                if symbol in trade_state and symbol not in recovery_orders:
                     place_recovery_order(symbol)
-                    for p in PAIRS: 
-                        update_daily_bias(p["symbol"])
-                for symbol in list(trade_state.keys()):
-                    if not is_position_open(symbol):
-                        if symbol in recovery_orders:
-                            try:
-                                session.cancel_order(
-                                    category=CATEGORY,
-                                    symbol=symbol,
-                                    orderId=recovery_orders[symbol]["order_id"])
-                            except:
-                                pass
-                            del recovery_orders[symbol]
-                        del trade_state[symbol]
-                for symbol in trade_state:
-                    if symbol not in recovery_orders:
-                        place_recovery_order(symbol)
-                        logger.info(f"{symbol} | Trade closed → cleanup done")
-            
-            # Lock per-day RF at start of UTC day if needed (one global RF for all pairs)
+
+            for p in PAIRS:
+                update_daily_bias(p["symbol"])
+
+            # ── Cleanup closed trades ────────────────────────────────────────
+            for symbol in list(trade_state.keys()):
+                if not is_position_open(symbol):
+                    # Cancel recovery order if position closed (TP or SL hit)
+                    cancel_recovery_order(symbol)
+                    del trade_state[symbol]
+                    logger.info(f"{symbol} | Trade closed → cleanup done")
+
             lock_weekly_rf_if_needed()
 
-            # Process each pair independently
-            
             for p in PAIRS:
                 utc_plus_1 = timezone(timedelta(hours=1))
                 now = datetime.now(utc_plus_1)
                 today = now.date()
                 should_run = False
-                
+
                 if last_scan:
                     should_run = True
                 elif now.hour == 1 and now.minute < 5:
@@ -1896,9 +1843,9 @@ def main():
                             logger.info(f"{sym} | Daily bias: buy={daily_fvg_state[sym]['allow_buy']}, sell={daily_fvg_state[sym]['allow_sell']}")
                             eligible_pairs.append(p)
                     logger.info(f"Scanning {len(eligible_pairs)} eligible symbols out of {len(PAIRS)}")
-                    
+
                     last_scan = False
-                    
+
             for p in eligible_pairs:
                 try:
                     handle_symbol(p)
@@ -1908,9 +1855,8 @@ def main():
             if len(eligible_pairs) == 0:
                 logger.info("No eligible pairs from daily bias. Skipping cycle.")
                 continue
-                    
+
             process_signal_queue()
-            # small sleep to avoid rate-limit bursts
             time.sleep(0.2)
 
     except KeyboardInterrupt:
