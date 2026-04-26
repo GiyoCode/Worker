@@ -1063,7 +1063,16 @@ def place_recovery_order(symbol):
     if symbol not in trade_state:
         return
     if symbol in recovery_orders:
-        return
+        try:
+            session.cancel_order(
+            category=CATEGORY,
+            symbol=symbol,
+            orderId=recovery_orders[symbol]["order_id"])
+        except Exception as e:
+            logger.error(f"{symbol} | Cancel failed: {e}")
+            
+        del recovery_orders[symbol]
+    place_recovery_order(symbol)
 
     t = trade_state[symbol]
 
@@ -1137,17 +1146,11 @@ def place_recovery_order(symbol):
             
             triggerPrice=str(rec_entry),
             triggerDirection=1 if rec_side == "Buy" else 2,
-            triggerBy="LastPrice",
             
-            positionIdx=position_idx
-        )
-        session.set_trading_stop(
-            category=CATEGORY,
-            symbol=symbol,
-            stopLoss=str(rec_sl),
             takeProfit=str(rec_tp),
-            positionIdx=position_idx)
+            stopLoss=str(rec_sl),
 
+            positionIdx=position_idx)
         order_id = resp["result"]["orderId"]
 
         recovery_orders[symbol] = {
