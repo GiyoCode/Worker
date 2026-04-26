@@ -1072,7 +1072,6 @@ def place_recovery_order(symbol):
             logger.error(f"{symbol} | Cancel failed: {e}")
             
         del recovery_orders[symbol]
-    place_recovery_order(symbol)
 
     t = trade_state[symbol]
 
