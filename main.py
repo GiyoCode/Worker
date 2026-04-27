@@ -1,4 +1,4 @@
- !/usr/bin/env python3
+ # !/usr/bin/env python3
 
 """
 LIVE PAPER FVG BOT (simulation only)
@@ -77,8 +77,8 @@ for p in PAIRS:
         
     }
 
-MAX_SYMBOLS = 100          # number of pairs to scan
-MAX_ACTIVE_TRADES = 6    # maximum open positions
+MAX_SYMBOLS = 100        
+MAX_ACTIVE_TRADES = 2    
 DEFAULT_LEVERAGE = 50
 
 last_symbol_refresh_week = None
@@ -1146,8 +1146,8 @@ def place_recovery_order(symbol):
             triggerPrice=str(rec_entry),
             triggerDirection=1 if rec_side == "Buy" else 2,
             
-            takeProfit=str(rec_tp),
-            stopLoss=str(rec_sl),
+            # takeProfit=str(rec_tp),
+            # stopLoss=str(rec_sl),
 
             positionIdx=position_idx)
         order_id = resp["result"]["orderId"]
