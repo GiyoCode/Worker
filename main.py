@@ -1138,16 +1138,17 @@ def place_recovery_order(symbol):
             category=CATEGORY,
             symbol=symbol,
             side=rec_side,
-            orderType="Limit",
+            orderType="Market",
             # price=str(rec_entry),
             qty=str(qty),
             timeInForce="GTC",
             
             triggerPrice=str(rec_entry),
             triggerDirection=1 if rec_side == "Buy" else 2,
+            triggerBy="MarkPrice",
             
-            # takeProfit=str(rec_tp),
-            # stopLoss=str(rec_sl),
+            takeProfit=str(rec_tp),
+            stopLoss=str(rec_sl),
 
             positionIdx=position_idx)
         order_id = resp["result"]["orderId"]
