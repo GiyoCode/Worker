@@ -1068,6 +1068,7 @@ def place_recovery_order(symbol):
             category=CATEGORY,
             symbol=symbol,
             orderId=recovery_orders[symbol]["order_id"])
+            logger.error(f"{symbol} |Recovery Order Cancelled")
         except Exception as e:
             logger.error(f"{symbol} | Cancel failed: {e}")
             
@@ -1187,6 +1188,7 @@ def update_recovery_order(symbol, new_sl):
             symbol=symbol,
             orderId=rec["order_id"]
         )
+        logger.info(f"{symbol} | Order Cancelled Recovery")
     except Exception as e:
         logger.error(f"{symbol} | Failed to cancel recovery order: {e}")
 
@@ -1859,6 +1861,7 @@ def main():
                                 category=CATEGORY,
                                 symbol=sym,
                                 orderId=recovery_orders[sym]["order_id"])
+                            logger.error(f"{symbol} | Order Cancel")
                         except Exception as e:
                             logger.error(f"{sym} | Failed to cancel recovery order: {e}")
                         del recovery_orders[sym]
