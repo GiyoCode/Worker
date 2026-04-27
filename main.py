@@ -78,7 +78,7 @@ for p in PAIRS:
     }
 
 MAX_SYMBOLS = 100        
-MAX_ACTIVE_TRADES = 2    
+MAX_ACTIVE_TRADES = 4    
 DEFAULT_LEVERAGE = 50
 
 last_symbol_refresh_week = None
@@ -1124,9 +1124,9 @@ def place_recovery_order(symbol):
     tp_distance = abs(rec_entry - rec_sl)
 
     if rec_side.upper() == "BUY":
-        rec_tp = rec_entry + tp_distance
+        rec_tp = (rec_entry + tp_distance) * (1 + (SL_BUFFER * 2))
     else:
-        rec_tp = rec_entry - tp_distance
+        rec_tp = (rec_entry - tp_distance) * (1 - (SL_BUFFER * 2))
             
     if recovery_qty <= 0:
         return
