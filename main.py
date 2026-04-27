@@ -1139,7 +1139,7 @@ def place_recovery_order(symbol):
             symbol=symbol,
             side=rec_side,
             orderType="Limit",
-            price=str(rec_entry),
+            # price=str(rec_entry),
             qty=str(qty),
             timeInForce="GTC",
             
