@@ -1116,11 +1116,18 @@ def place_recovery_order(symbol):
     recovery_qty = risk_amount / sl_distance
     recovery_qty = round_qty(symbol, recovery_qty)
     recovery_qty = fit_qty_to_margin(symbol, rec_entry, leverage, recovery_qty)
-    
+     
     if recovery_qty is None:
         return
     if recovery_qty <= 0:
         return
+    min_cost = 5.5
+ 
+    min_qty = min_cost/rec_entry
+ 
+    if recovery_qty < min_qty:
+        recovery_qty = min_qty
+     
     tp_distance = abs(rec_entry - rec_sl)
 
     if rec_side.upper() == "BUY":
