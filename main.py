@@ -243,8 +243,8 @@ def find_structure_sl(symbol, side, sl, lookback=20):
     levels = []
 
     for i in range(2, len(candles) - 2):
-        logger.info(f"candle close: {c['open']}")
         c = candles[i]
+        logger.info(f"candle close: {c['open']}")
 
         if side == "BUY":
             is_swing_low = (
