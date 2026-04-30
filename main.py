@@ -1488,7 +1488,7 @@ def handle_symbol(pair):
             normal_tp = entry + (abs(entry - sl) * 0.5)
             tp = normal_tp * ( 1 + SL_BUFFER )
 
-            logger.info(f"{symbol} | BUY CONFIRMED | entry={entry} sl={sl} tp={tp}")
+            logger.info(f"{symbol} | BUY CONFIRMED | entry={entry} sl={sl} tp={tp} qty={qty}")
             if USE_REAL_TRADING and position_exists(symbol, "Sell"):
                 try:
                     logger.info(f"{symbol} | Closing existing SELL before opening BUY")
@@ -1633,10 +1633,10 @@ def handle_symbol(pair):
                 logger.info(f"{symbol} | SELL skipped: SL distance < 0.1%")
                 return
                 
-            normal_tp = entry + (abs(entry - sl) * 0.5)
+            normal_tp = entry - (abs(entry - sl) * 0.5)
             tp = normal_tp * ( 1 - SL_BUFFER )
             
-            logger.info(f"{symbol} | SELL CONFIRMED | entry={entry} sl={sl} tp={tp}")
+            logger.info(f"{symbol} | SELL CONFIRMED | entry={entry} sl={sl} tp={tp} qty={qty}")
             if USE_REAL_TRADING and position_exists(symbol, "Buy"):
                 try:
                     logger.info(f"{symbol} | Closing existing BUY before opening SELL")
