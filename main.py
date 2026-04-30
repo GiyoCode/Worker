@@ -1,4 +1,4 @@
-!/usr/bin/env python3
+# !/usr/bin/env python3
 
 """
 LIVE PAPER FVG BOT (simulation only)
@@ -803,7 +803,7 @@ def find_tp_buy_30m(symbol, entry, sl):
     candles_30m = fetch_30m_candles(symbol)
 
     risk = abs(entry - sl)
-    normal_tp = entry + (risk * 2)
+    normal_tp = entry + (risk * 0.5)
 
     for c in candles_30m:
         if c["high"] >= normal_tp:
@@ -1484,14 +1484,10 @@ def handle_symbol(pair):
             if sl_too_small(entry, real_sl):
                 logger.info(f"{symbol} | BUY skipped: SL distance < 0.1%")
                 return
-            normal_tp = entry + (abs(entry - sl) * 2)
-            tp = find_tp_structure_30m(symbol, entry, "BUY", normal_tp)
-            if tp is None:
-                tp = normal_tp
+                
+            normal_tp = entry + (abs(entry - sl) * 0.5)
+            tp = normal_tp * ( 1 + SL_BUFFER )
 
-            if abs(tp - entry) < 2 * abs(entry - sl):
-                logger.info(f"{symbol} | BUY skipped: RR too low after liquidity TP")
-                return  # skip weak trade
             logger.info(f"{symbol} | BUY CONFIRMED | entry={entry} sl={sl} tp={tp}")
             if USE_REAL_TRADING and position_exists(symbol, "Sell"):
                 try:
@@ -1636,14 +1632,9 @@ def handle_symbol(pair):
             if sl_too_small(entry, risk_sl):
                 logger.info(f"{symbol} | SELL skipped: SL distance < 0.1%")
                 return
-            normal_tp = entry - (abs(entry - sl) * 2)
-            tp = find_tp_structure_30m(symbol, entry, "SELL", normal_tp)
-            if tp is None:
-                tp = normal_tp
-
-            if abs(tp - entry) < 2 * abs(entry - sl):
-                logger.info(f"{symbol} | SELL skipped: RR too low after liquidity TP")
-                return  # skip weak trade
+                
+            normal_tp = entry + (abs(entry - sl) * 0.5)
+            tp = normal_tp * ( 1 - SL_BUFFER )
             
             logger.info(f"{symbol} | SELL CONFIRMED | entry={entry} sl={sl} tp={tp}")
             if USE_REAL_TRADING and position_exists(symbol, "Buy"):
