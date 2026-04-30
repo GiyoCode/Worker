@@ -261,13 +261,13 @@ def find_structure_sl(symbol, side, sl, lookback=20):
         elif side == "SELL":
             logger.info(f"candle close: {c['open']}")
             is_swing_high = (
-                c["high"] => candles[i-1]["high"] and
-                c["high"] => candles[i-2]["high"] and
-                c["high"] => candles[i+1]["high"] and
-                c["high"] => candles[i+2]["high"]
+                c["high"] >= candles[i-1]["high"] and
+                c["high"] >= candles[i-2]["high"] and
+                c["high"] >= candles[i+1]["high"] and
+                c["high"] >= candles[i+2]["high"]
             )
 
-            if is_swing_high and c["high"] => sl:
+            if is_swing_high and c["high"] >= sl:
                 logger.info(f"swing high: {c['high']}")
                 levels.append(c["high"])
         logger.info(f"levels list: {levels}")
@@ -306,7 +306,7 @@ def find_consolidation_sl(symbol, entry, side, lookback=20, tolerance=0.002):
             if side == "BUY" and zone_low <= entry:
                 levels.append(zone_low)
 
-            elif side == "SELL" and zone_high => entry:
+            elif side == "SELL" and zone_high >= entry:
                 levels.append(zone_high)
 
     if not levels:
@@ -574,10 +574,10 @@ def find_latest_swing_30m(symbol, side):
 
         elif side == "SELL":
             is_swing_high = (
-                c["high"] => candles[i-1]["high"] and
-                c["high"] => candles[i-2]["high"] and
-                c["high"] => candles[i+1]["high"] and
-                c["high"] => candles[i+2]["high"]
+                c["high"] >= candles[i-1]["high"] and
+                c["high"] >= candles[i-2]["high"] and
+                c["high"] >= candles[i+1]["high"] and
+                c["high"] >= candles[i+2]["high"]
             )
             if is_swing_high:
                 swing = c["high"]
@@ -821,10 +821,10 @@ def find_tp_structure_30m(symbol, entry, side, tp):
 
         if side == "BUY" and c["high"] > tp:
             is_high = (
-                c["high"] => candles[i-1]["high"] and
-                c["high"] => candles[i+1]["high"]
+                c["high"] >= candles[i-1]["high"] and
+                c["high"] >= candles[i+1]["high"]
             )
-            if is_high and c["high"] => entry:
+            if is_high and c["high"] >= entry:
                 levels.append(c["high"])
 
         else:
