@@ -244,7 +244,7 @@ def find_structure_sl(symbol, side, sl, lookback=20):
 
     for i in range(2, len(candles) - 2):
         c = candles[i]
-        logger.info(f"candle close: {c['open']}")
+        logger.info(f"{symbol} candle close: {c['open']}")
 
         if side == "BUY":
             is_swing_low = (
@@ -267,14 +267,14 @@ def find_structure_sl(symbol, side, sl, lookback=20):
 
             if is_swing_high and c["high"] >= sl:
                 levels.append(c["high"])
-        logger.info(f"levels list: {levels}")
+        logger.info(f"{symbol} levels list: {levels}")
 
     if not levels:
-        logger.info(f"No levels")
+        logger.info(f"{symbol} No levels")
         return None
         
     if levels:
-        logger.info(f"levels fs: {levels}")
+        logger.info(f"{symbol} levels fs: {levels}")
 
     return levels[-1]
 
@@ -306,7 +306,7 @@ def find_consolidation_sl(symbol, entry, side, lookback=20, tolerance=0.002):
         return None
         
     if levels:
-        logger.info(f"levels fc: {levels[-1]}")
+        logger.info(f"{symbol} levels fc: {levels[-1]}")
         return levels[-1]
     
 def get_symbol_specs(symbol):
@@ -619,17 +619,17 @@ def update_trailing_sl():
         new_swing = find_structure_sl(symbol, side_clean, current_sl)
 
         if new_swing is None:
-            logger.info(f"Position Not Swing")
+            logger.info(f"{symbol} Position Not Swing")
             continue
 
         # =========================
         # BUY LOGIC
         # =========================
         if side_clean == "BUY":
-            logger.info(f"Position Buy")
+            logger.info(f"{symbol} Position Buy")
             # only move SL UP
             if new_swing > current_sl and new_swing < entry:
-                logger.info(f"Position active buy")
+                logger.info(f"{symbol} Position active buy")
                 new_sl = new_swing
             else:
                 continue
@@ -638,21 +638,21 @@ def update_trailing_sl():
         # SELL LOGIC
         # =========================
         else:
-            logger.info(f"Position Sell")
+            logger.info(f"{symbol} Position Sell")
             # only move SL DOWN
             if (current_sl == 0 or new_swing < current_sl) and new_swing > entry:
-                logger.info(f"Position active sell")
+                logger.info(f"{symbol} Position active sell")
                 new_sl = new_swing
             else:
                 continue
         if abs(new_sl - current_sl) / entry < 0.001:
-            logger.info(f"Position small")
+            logger.info(f"{symbol} Position small")
             continue
         # =========================
         # APPLY UPDATE
         # =========================
         if symbol in trade_state:
-            logger.info(f"Position update")
+            logger.info(f"{symbol} Position update")
             update_recovery_order(symbol, new_sl)
         try:
             session.set_trading_stop(
@@ -837,8 +837,8 @@ def find_tp_structure_30m(symbol, entry, side, tp):
                         
     if not levels:
         return None
-    logger.info(f"levels ftp: {levels}")
-    logger.info(f"levels min: {min(levels)}, levels max: {max(levels)}")
+    logger.info(f"{symbol} levels ftp: {levels}")
+    logger.info(f"{symbol} levels min: {min(levels)}, levels max: {max(levels)}")
 
     return levels[-1]
 
@@ -1055,14 +1055,14 @@ def get_total_open_positions():
 def is_position_open(symbol):
     for pos in account_cache["positions"]:
         if pos["symbol"] == symbol and float(pos["size"]) > 0:
-            logger.info(f"Open true")
+            logger.info(f"{symbol} Open true")
             return True
-    logger.info(f"Open false")
+    logger.info(f"{symbol} Open false")
     return False
 
 def place_recovery_order(symbol):
     if symbol not in trade_state:
-        logger.info(f"No ts")
+        logger.info(f"{symbol} No ts")
         return
     if symbol in recovery_orders:
         try:
@@ -1073,7 +1073,7 @@ def place_recovery_order(symbol):
             logger.error(f"{symbol} |Recovery Order Cancelled")
         except Exception as e:
             logger.error(f"{symbol} | Cancel failed: {e}")
-        logger.info(f"delete ro")
+        logger.info(f"{symbol} delete ro")
         del recovery_orders[symbol]
 
     t = trade_state[symbol]
@@ -1099,7 +1099,7 @@ def place_recovery_order(symbol):
         logger.warning(f"{symbol} | No valid SL for recovery, skipping")
         return
        
-    logger.info(f"recovery chosen sl: {real_sl}")
+    logger.info(f"{symbol} recovery chosen sl: {real_sl}")
 
     rec_sl = real_sl
             
@@ -1114,17 +1114,17 @@ def place_recovery_order(symbol):
         risk_sl = rec_sl * (1 + (SL_BUFFER * 1))
     sl_distance = abs(rec_entry - risk_sl)
     if sl_distance <= 0:
-        logger.info(f"SL Distance Is less Than Or Equal To Zero")
+        logger.info(f"{symbol} SL Distance Is less Than Or Equal To Zero")
         return
     recovery_qty = risk_amount / sl_distance
     recovery_qty = round_qty(symbol, recovery_qty)
     recovery_qty = fit_qty_to_margin(symbol, rec_entry, leverage, recovery_qty)
      
     if recovery_qty is None:
-        logger.info(f"Recovery Qty Is None")
+        logger.info(f"{symbol} Recovery Qty Is None")
         return
     if recovery_qty <= 0:
-        logger.info(f"Recovery Qty Is less Than Or Equal To Zero")
+        logger.info(f"{symbol} Recovery Qty Is less Than Or Equal To Zero")
         return
     min_cost = 5.5
  
@@ -1132,6 +1132,8 @@ def place_recovery_order(symbol):
  
     if recovery_qty < min_qty:
         recovery_qty = min_qty
+        recovery_qty = round_qty(symbol, recovery_qty)
+        recovery_qty = fit_qty_to_margin(symbol, rec_entry, leverage, recovery_qty)
      
     tp_distance = abs(rec_entry - rec_sl)
 
@@ -1141,10 +1143,10 @@ def place_recovery_order(symbol):
         rec_tp = (rec_entry - tp_distance) * (1 - (SL_BUFFER * 2))
             
     if recovery_qty <= 0:
-        logger.info(f"Recovery Qty Is less Than Or Equal To Zero")
+        logger.info(f"{symbol} Recovery Qty Is less Than Or Equal To Zero")
         return
     if recovery_qty is None:
-        logger.info(f"Recovery Qty Is None")
+        logger.info(f"{symbol} Recovery Qty Is None")
         return
     qty = recovery_qty
  
@@ -1190,7 +1192,7 @@ def place_recovery_order(symbol):
 
 def update_recovery_order(symbol, new_sl):
     if symbol not in recovery_orders or symbol not in trade_state:
-        logger.info(f"Symbol Not In Rec Orders Or Trade State")
+        logger.info(f"{symbol} Symbol Not In Rec Orders Or Trade State")
         return
 
     rec = recovery_orders[symbol]
@@ -1454,7 +1456,7 @@ def handle_symbol(pair):
             sl = bf["low"]
             chosen_sl = find_structure_sl(symbol, "BUY", sl)
        
-            logger.info(f"chosen sl: {chosen_sl}")
+            logger.info(f"{symbol} chosen sl: {chosen_sl}")
 
                 
             real_sl = chosen_sl if chosen_sl else min(
@@ -1603,7 +1605,7 @@ def handle_symbol(pair):
             sl = sf["high"] 
             chosen_sl = find_structure_sl(symbol, "SELL", sl)      
                 
-            logger.info(f"chosen sl: {chosen_sl}")
+            logger.info(f"{symbol} chosen sl: {chosen_sl}")
                 
             real_sl = chosen_sl if chosen_sl else max(
                 sf["high"],
@@ -1860,9 +1862,9 @@ def main():
                     
             for sym in list(trade_state.keys()):
                 if not is_position_open(sym):
-                    logger.info(f"Position Not Open")
+                    logger.info(f"{sym} Position Not Open")
                     if sym in recovery_orders:
-                        logger.info(f"Position in recovery trades")
+                        logger.info(f"{sym} Position in recovery trades")
                         try:
                             session.cancel_order(
                                 category=CATEGORY,
