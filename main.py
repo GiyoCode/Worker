@@ -278,6 +278,46 @@ def find_structure_sl(symbol, side, sl, lookback=20):
 
     return levels[-1]
 
+def find_structure_rec_sl(symbol, side, sl, lookback=20):
+    candles = fetch_candles(symbol, interval=INTERVAL, limit=30)
+
+    levels = []
+
+    for i in range(2, len(candles) - 2):
+        c = candles[i]
+        logger.info(f"{symbol} candle close: {c['open']}")
+
+        if side == "BUY":
+            is_swing_low = (
+                c["low"] <= candles[i-1]["low"] and
+                c["low"] <= candles[i-2]["low"] and
+                c["low"] <= candles[i+1]["low"] and
+                c["low"] <= candles[i+2]["low"]
+            )
+
+            if is_swing_low and c["low"] >= sl:
+                levels.append(c["low"])
+
+        elif side == "SELL":
+            is_swing_high = (
+                c["high"] >= candles[i-1]["high"] and
+                c["high"] >= candles[i-2]["high"] and
+                c["high"] >= candles[i+1]["high"] and
+                c["high"] >= candles[i+2]["high"]
+            )
+
+            if is_swing_high and c["high"] <= sl:
+                levels.append(c["high"])
+        logger.info(f"{symbol} levels list: {levels}")
+
+    if not levels:
+        logger.info(f"{symbol} No levels")
+        return None
+        
+    if levels:
+        logger.info(f"{symbol} levels fs: {levels}")
+
+    return levels[-1]
 
 def find_consolidation_sl(symbol, entry, side, lookback=20, tolerance=0.002):
     candles = fetch_candles(symbol, interval=INTERVAL, limit=25)
@@ -616,7 +656,7 @@ def update_trailing_sl():
         side_clean = "BUY" if side == "Buy" else "SELL"
         entry = 1
 
-        new_swing = find_structure_sl(symbol, side_clean, current_sl)
+        new_swing = find_structure_rec_sl(symbol, side_clean, current_sl)
 
         if new_swing is None:
             logger.info(f"{symbol} Position Not Swing")
