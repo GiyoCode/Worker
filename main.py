@@ -1022,9 +1022,6 @@ def round_qty(symbol, qty):
 
     qty = (qty // step) * step  # floor to step
 
-    if qty < min_qty:
-        qty = min_qty
-
     return float(qty)
 
 def get_margin_usage():
