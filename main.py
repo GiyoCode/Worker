@@ -653,7 +653,7 @@ def update_trailing_sl():
         current_sl = float(pos.get("stopLoss", 0) or 0)
 
         # Normalize side
-        side_clean = "BUY" if side == "Buy" else "SELL"
+        side_clean = "BUY" if side == "Sell" else "Buy"
         entry = 1
 
         new_swing = find_structure_rec_sl(symbol, side_clean, current_sl)
